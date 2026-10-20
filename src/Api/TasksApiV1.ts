@@ -1,3 +1,5 @@
+import type { ReadOnlyTask } from '../Task/ReadOnlyTask';
+
 /**
  * Tasks API v1 interface
  */
@@ -29,4 +31,12 @@ export interface TasksApiV1 {
      *          if a recurring task was completed.
      */
     executeToggleTaskDoneCommand: (line: string, path: string) => string;
+
+    /**
+     * Registers a callback to be called whenever a task list item is rendered.
+     *
+     * @param callback Function called with the rendered list item and read-only task snapshot.
+     * @returns A cleanup function to unregister the hook.
+     */
+    registerRenderHook(callback: (li: HTMLLIElement, task: ReadOnlyTask) => void): () => void;
 }

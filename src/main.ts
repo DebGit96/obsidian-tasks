@@ -16,7 +16,7 @@ import { StatusRegistry } from './Statuses/StatusRegistry';
 import { log, logging } from './lib/logging';
 import { EditorSuggestor } from './Suggestor/EditorSuggestorPopup';
 import { StatusSettings } from './Config/StatusSettings';
-import { tasksApiV1 } from './Api';
+import { TaskRenderHooks, tasksApiV1 } from './Api';
 import { GlobalFilter } from './Config/GlobalFilter';
 import { QueryFileDefaults } from './Query/QueryFileDefaults';
 import { LinkResolver } from './Task/LinkResolver';
@@ -82,6 +82,7 @@ export default class TasksPlugin extends Plugin {
         this.registerEditorExtension(newLivePreviewExtension(this));
         this.registerEditorSuggest(new EditorSuggestor(this.app, getSettings(), this));
         new Commands({ plugin: this });
+        TaskRenderHooks.getInstance().listenToWorkspace(this.app.workspace);
     }
 
     async loadTaskStatuses() {
@@ -90,8 +91,13 @@ export default class TasksPlugin extends Plugin {
     }
 
     onunload() {
-        log('info', i18n.t('main.unloadingPlugin', { name: this.manifest.name, version: this.manifest.version }));
+        try {
+            log('info', i18n.t('main.unloadingPlugin', { name: this.manifest.name, version: this.manifest.version }));
+        } catch {
+            // i18n may not be initialized if plugin failed or was not loaded
+        }
         this.cache?.unload();
+        TaskRenderHooks.getInstance().reset(this.app.workspace);
     }
 
     async loadSettings() {

@@ -8,6 +8,7 @@ import type { GroupDisplayHeading } from '../Query/Group/GroupDisplayHeading';
 import type { QueryResult } from '../Query/QueryResult';
 import type { TasksFile } from '../Scripting/TasksFile';
 import type { ListItem } from '../Task/ListItem';
+import { taskToReadOnlyTask } from '../Task/ReadOnlyTask';
 import type { Task } from '../Task/Task';
 import { PostponeMenu } from '../ui/Menus/PostponeMenu';
 import { showMenu } from '../ui/Menus/TaskEditingMenu';
@@ -42,6 +43,10 @@ export class HtmlQueryResultsRenderer extends QueryResultsRendererBase {
     protected readonly renderMarkdown;
     protected readonly obsidianComponent: Component | null;
     protected readonly obsidianApp: App;
+
+    public get app(): App {
+        return this.obsidianApp;
+    }
 
     private readonly taskLineRenderer: TaskLineRenderer;
 
@@ -197,6 +202,8 @@ export class HtmlQueryResultsRenderer extends QueryResultsRendererBase {
         }
 
         this.currentULElement().appendChild(listItem);
+
+        this.app?.workspace?.trigger?.('tasks:task-rendered', listItem, taskToReadOnlyTask(task));
     }
 
     protected extendTaskBehaviour(_listItem: HTMLLIElement, _task: Task) {}
