@@ -44,4 +44,18 @@ describe('definition of public Api', () => {
         await publicApi.editTaskLineModal(taskLine);
         expect(editTaskLineModal).toHaveBeenCalledWith(app, taskLine, tasks, expect.any(Function));
     });
+
+    it('should register and unregister render hook via TaskRenderHooks', () => {
+        const mockPlugin = {
+            app: {} as App,
+            saveSettings: vi.fn(),
+            getTasks: () => [],
+        } as unknown as TasksPlugin;
+
+        const publicApi = tasksApiV1(mockPlugin);
+        const hook = vi.fn();
+        const unregister = publicApi.registerRenderHook(hook);
+
+        expect(typeof unregister).toBe('function');
+    });
 });

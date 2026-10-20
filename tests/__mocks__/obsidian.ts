@@ -9,7 +9,45 @@ export {};
  * and just treat it as an "opaque object" for markdown rendering, there is
  * not a lot to mock in particular.
  */
-export const mockApp = {} as unknown as App;
+const workspaceListeners: Record<string, ((...args: any[]) => void)[]> = {};
+
+export function resetMockWorkspace(): void {
+    for (const key of Object.keys(workspaceListeners)) {
+        delete workspaceListeners[key];
+    }
+}
+
+export const mockApp = {
+    workspace: {
+        trigger: (name: string, ...args: any[]) => {
+            const listeners = workspaceListeners[name] || [];
+            listeners.slice().forEach((cb) => cb(...args));
+        },
+        on: (name: string, callback: (...args: any[]) => void) => {
+            if (!workspaceListeners[name]) {
+                workspaceListeners[name] = [];
+            }
+            workspaceListeners[name].push(callback);
+            return { name, callback };
+        },
+        off: (nameOrRef: any, callback?: (...args: any[]) => void) => {
+            if (typeof nameOrRef === 'string') {
+                if (workspaceListeners[nameOrRef] && callback) {
+                    workspaceListeners[nameOrRef] = workspaceListeners[nameOrRef].filter((cb) => cb !== callback);
+                }
+            } else if (nameOrRef && workspaceListeners[nameOrRef.name]) {
+                workspaceListeners[nameOrRef.name] = workspaceListeners[nameOrRef.name].filter(
+                    (cb) => cb !== nameOrRef.callback,
+                );
+            }
+        },
+        offref: (ref: any) => {
+            if (ref && workspaceListeners[ref.name]) {
+                workspaceListeners[ref.name] = workspaceListeners[ref.name].filter((cb) => cb !== ref.callback);
+            }
+        },
+    },
+} as unknown as App;
 
 /**
  * Creates a minimal Obsidian TFile for tests that only need file metadata.

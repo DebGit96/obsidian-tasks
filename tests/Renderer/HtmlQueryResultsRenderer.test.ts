@@ -1,3 +1,4 @@
+import type { App } from 'obsidian';
 import moment from 'moment/moment';
 import { GlobalFilter } from '../../src/Config/GlobalFilter';
 import { GlobalQuery } from '../../src/Config/GlobalQuery';
@@ -7,7 +8,9 @@ import { getQueryForQueryRenderer } from '../../src/Query/QueryRendererHelper';
 import { HtmlQueryResultsRenderer } from '../../src/Renderer/HtmlQueryResultsRenderer';
 import type { TasksFile } from '../../src/Scripting/TasksFile';
 import type { Task } from '../../src/Task/Task';
-import { mockApp } from '../__mocks__/obsidian';
+import { TaskRenderHooks, tasksApiV1 } from '../../src/Api';
+import type TasksPlugin from '../../src/main';
+import { mockApp, resetMockWorkspace } from '../__mocks__/obsidian';
 import { readTasksFromSimulatedFile } from '../Obsidian/SimulatedFile';
 import { TaskBuilder } from '../TestingTools/TaskBuilder';
 import { createTestTasksFile } from '../TestingTools/TasksFileHelpers';
@@ -88,6 +91,8 @@ afterEach(() => {
     GlobalFilter.getInstance().reset();
     GlobalQuery.getInstance().reset();
     resetSettings();
+    TaskRenderHooks.getInstance().reset(mockApp.workspace);
+    resetMockWorkspace();
 });
 
 describe('HtmlQueryResultsRenderer tests', () => {
@@ -569,5 +574,133 @@ For more info: https://publish.obsidian.md/tasks-contributing/Testing/Using+Obsi
         expect(description).toMatchInlineSnapshot(
             '"<span>#task Task with \\[\\[#Escaped Links\\]\\] escaped link</span>"',
         );
+    });
+});
+
+describe('Task rendering hooks and events', () => {
+    it('should trigger "tasks:task-rendered" workspace event with li and task', async () => {
+        const triggerSpy = vi.fn();
+        const appWithMockWorkspace = {
+            workspace: {
+                trigger: triggerSpy,
+            },
+        } as unknown as App;
+
+        const allTasks = [TaskBuilder.createFullyPopulatedTask()];
+        const tasksFile = createTestTasksFile('query.md');
+        const query = getQueryForQueryRenderer('', GlobalQuery.getInstance(), tasksFile);
+
+        const renderer = new HtmlQueryResultsRenderer(
+            () => Promise.resolve(),
+            null,
+            appWithMockWorkspace,
+            mockHTMLRenderer,
+            makeHtmlQueryRendererParameters(allTasks),
+            '',
+            tasksFile,
+            query,
+        );
+
+        const container = document.createElement('div');
+        renderer.content = container;
+        await renderer.renderQuery(State.Warm, query.applyQueryToTasks(allTasks));
+
+        expect(triggerSpy).toHaveBeenCalledTimes(1);
+        const [eventName, li, task] = triggerSpy.mock.calls[0];
+        expect(eventName).toBe('tasks:task-rendered');
+        expect(li.tagName).toBe('LI');
+        expect(Object.isFrozen(task)).toBe(true);
+        expect(task.description).toBe(allTasks[0].description);
+        expect(task.originalMarkdown).toBe(allTasks[0].originalMarkdown);
+        expect(task.path).toBe(allTasks[0].path);
+        expect(task.lineNumber).toBe(allTasks[0].lineNumber);
+    });
+
+    it('should invoke render hook registered via TasksApiV1', async () => {
+        const hookCallback = vi.fn();
+        const fakePlugin = {
+            app: mockApp,
+            saveSettings: vi.fn(),
+            getTasks: () => [],
+        } as unknown as TasksPlugin;
+
+        const api = tasksApiV1(fakePlugin);
+        const unregister = api.registerRenderHook(hookCallback);
+
+        const allTasks = [TaskBuilder.createFullyPopulatedTask()];
+        const tasksFile = createTestTasksFile('query.md');
+        const { query, renderer } = makeHtmlRenderer('', tasksFile, allTasks);
+
+        const container = document.createElement('div');
+        renderer.content = container;
+        await renderer.renderQuery(State.Warm, query.applyQueryToTasks(allTasks));
+
+        expect(hookCallback).toHaveBeenCalledTimes(1);
+        const [li, task] = hookCallback.mock.calls[0];
+        expect(li.tagName).toBe('LI');
+        expect(Object.isFrozen(task)).toBe(true);
+        expect(task.description).toBe(allTasks[0].description);
+        expect(task.originalMarkdown).toBe(allTasks[0].originalMarkdown);
+
+        // Test unregistering
+        hookCallback.mockClear();
+        unregister();
+
+        await renderer.renderQuery(State.Warm, query.applyQueryToTasks(allTasks));
+        expect(hookCallback).not.toHaveBeenCalled();
+    });
+
+    it('should invoke hooks for each rendered task without failing if a hook throws', async () => {
+        const errorHook = vi.fn(() => {
+            throw new Error('Test error in hook');
+        });
+        const goodHook = vi.fn();
+        const fakePlugin = {
+            app: mockApp,
+            saveSettings: vi.fn(),
+            getTasks: () => [],
+        } as unknown as TasksPlugin;
+        const api = tasksApiV1(fakePlugin);
+        api.registerRenderHook(errorHook);
+        api.registerRenderHook(goodHook);
+
+        const task1 = TaskBuilder.createFullyPopulatedTask();
+        const task2 = new TaskBuilder().description('Second task').build();
+        const allTasks = [task1, task2];
+        const tasksFile = createTestTasksFile('query.md');
+        const { query, renderer } = makeHtmlRenderer('', tasksFile, allTasks);
+
+        const container = document.createElement('div');
+        renderer.content = container;
+        await renderer.renderQuery(State.Warm, query.applyQueryToTasks(allTasks));
+
+        expect(errorHook).toHaveBeenCalledTimes(2);
+        expect(goodHook).toHaveBeenCalledTimes(2);
+    });
+
+    it('should re-attach workspace listener when registerRenderHook is called after reset', async () => {
+        const fakePlugin = {
+            app: mockApp,
+            saveSettings: vi.fn(),
+            getTasks: () => [],
+        } as unknown as TasksPlugin;
+        const api = tasksApiV1(fakePlugin);
+
+        // Simulate plugin unload / reset
+        TaskRenderHooks.getInstance().reset(mockApp.workspace);
+
+        // Re-register hook using existing api reference
+        const hookCallback = vi.fn();
+        api.registerRenderHook(hookCallback);
+
+        const allTasks = [TaskBuilder.createFullyPopulatedTask()];
+        const tasksFile = createTestTasksFile('query.md');
+        const { query, renderer } = makeHtmlRenderer('', tasksFile, allTasks);
+
+        const container = document.createElement('div');
+        renderer.content = container;
+        await renderer.renderQuery(State.Warm, query.applyQueryToTasks(allTasks));
+
+        expect(hookCallback).toHaveBeenCalledTimes(1);
     });
 });
